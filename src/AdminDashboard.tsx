@@ -29,6 +29,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
     try {
       const webhookUrl = import.meta.env.VITE_PA_API_WEBHOOK_URL;
       if (!webhookUrl || webhookUrl.includes('COLE_AQUI')) {
+         alert("🚨 O LINK DA API ESTÁ VAZIO OU É 'COLE_AQUI'!\nO GitHub não conseguiu ler o seu Secret 'VITE_PA_API_WEBHOOK_URL'.");
          setIsLoading(false);
          return;
       }
