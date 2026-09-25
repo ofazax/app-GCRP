@@ -37,11 +37,8 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          VITE_POWER_AUTOMATE_WEBHOOK_URL: ${{ secrets.VITE_POWER_AUTOMATE_WEBHOOK_URL }}
           VITE_PA_LOGIN_WEBHOOK_URL: ${{ secrets.VITE_PA_LOGIN_WEBHOOK_URL }}
-          VITE_PA_GET_USERS_WEBHOOK_URL: ${{ secrets.VITE_PA_GET_USERS_WEBHOOK_URL }}
-          VITE_PA_MANAGE_USER_WEBHOOK_URL: ${{ secrets.VITE_PA_MANAGE_USER_WEBHOOK_URL }}
-          VITE_PA_GET_SUBMISSIONS_WEBHOOK_URL: ${{ secrets.VITE_PA_GET_SUBMISSIONS_WEBHOOK_URL }}
+          VITE_PA_API_WEBHOOK_URL: ${{ secrets.VITE_PA_API_WEBHOOK_URL }}
           
       - name: Setup Pages
         uses: actions/configure-pages@v4
