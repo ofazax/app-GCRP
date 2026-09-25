@@ -38,7 +38,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "LIST_USERS" })
       });
-      if (!response.ok) throw new Error('Erro HTTP');
+      if (!response.ok) throw new Error('Erro HTTP ' + response.status);
       const data = await response.json();
       if (data && Array.isArray(data)) {
         const normalizedUsers = data.map(u => ({
@@ -47,8 +47,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
         }));
         setUsers(normalizedUsers);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      alert("🚨 ERRO AO LISTAR: " + err.message + "\n\nChecando Webhook (Primeiros 40 caracteres):\n" + String(import.meta.env.VITE_PA_API_WEBHOOK_URL).substring(0, 40));
     } finally {
       setIsLoading(false);
     }
