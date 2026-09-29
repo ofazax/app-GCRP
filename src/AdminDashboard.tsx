@@ -164,6 +164,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
     return String(val);
   };
 
+  const extractImage = (val: any): string => {
+    if (!val) return "";
+    if (typeof val === 'string') {
+      try {
+        const parsed = JSON.parse(val);
+        if (parsed.serverRelativeUrl || parsed.serverUrl) return (parsed.serverUrl || "") + (parsed.serverRelativeUrl || "");
+        if (parsed.Url || parsed.url || parsed.Value || parsed.value) return parsed.Url || parsed.url || parsed.Value || parsed.value;
+      } catch (e) {
+        return val;
+      }
+    }
+    if (typeof val === 'object') {
+      if (val.serverRelativeUrl || val.serverUrl) return (val.serverUrl || "") + (val.serverRelativeUrl || "");
+      if (val.Url || val.url || val.Value || val.value) return val.Url || val.url || val.Value || val.value;
+    }
+    return String(val);
+  };
+
   return (
     <div className="min-h-screen bg-[#002836] text-white p-4 md:p-8 font-sans relative selection:bg-[#00aeef]/30">
       <div className='fixed inset-0 overflow-hidden pointer-events-none'>
@@ -372,45 +390,57 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
                 </div>
               ) : (
                 <div className="flex flex-col gap-4">
-                  {userSubmissions.map((sub, idx) => (
-                    <div key={sub._id || idx} className="bg-black/20 border border-white/10 rounded-xl p-4">
-                      <div className="flex justify-between items-start mb-2">
-                        <span className="font-semibold text-[#00aeef]">#{idx + 1} - {safeRender(sub["NOMECOMPLETO"]) || "Sem Nome"}</span>
-                        <span className="text-xs text-white/50">
-                          {sub.created_at ? new Date(sub.created_at).toLocaleString('pt-BR') : safeRender(sub["Data"])}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-y-2 gap-x-4 text-sm text-white/80 mt-3">
-                        <div><span className="text-white/50 block text-xs">CPF</span> {safeRender(sub["CPF"])}</div>
-                        <div><span className="text-white/50 block text-xs">Bairro</span> {safeRender(sub["BAIRRO"])}</div>
-                        <div><span className="text-white/50 block text-xs">Cidade</span> {safeRender(sub["CIDADE"])}</div>
-                        <div className="col-span-2 sm:col-span-3">
-                          <span className="text-white/50 block text-xs">Endereço</span> 
-                          {safeRender(sub["TIPODELOGRADOURO"])} {safeRender(sub["LOGRADOURO"])}, {safeRender(sub["N_x00da_MERO"])} {safeRender(sub["COMPLEMENTO"])}
+                  {userSubmissions.map((sub, idx) => {
+                    const statusVisita = safeRender(sub["STATUSDAVISITA"]);
+                    const isSimplified = ['Ausente', 'Inexistente', 'Recusa', 'Lote Vago', 'Lote'].includes(statusVisita);
+                    const nomeStr = safeRender(sub["NOMECOMPLETO"]);
+                    const titleText = nomeStr || (isSimplified ? statusVisita : "Sem Nome");
+
+                    return (
+                      <div key={sub._id || idx} className="bg-black/20 border border-white/10 rounded-xl p-4">
+                        <div className="flex justify-between items-start mb-2">
+                          <span className="font-semibold text-[#00aeef]">#{idx + 1} - {titleText}</span>
+                          <span className="text-xs text-white/50">
+                            {sub.created_at ? new Date(sub.created_at).toLocaleString('pt-BR') : safeRender(sub["Data"])}
+                          </span>
                         </div>
-                        <div className="col-span-2 sm:col-span-3 mt-2 flex flex-wrap gap-2">
-                          <button
-                            onClick={() => setSelectedSubmissionForImages(sub)}
-                            className="px-3 py-1.5 bg-[#00aeef]/15 hover:bg-[#00aeef]/20 text-[#00aeef] rounded-lg transition-colors text-xs font-medium flex items-center gap-2 w-fit"
-                          >
-                            <ImageIcon size={14} />
-                            Ver Imagens
-                          </button>
-                          {sub["Latitude0"] && sub["Longitude0"] && (
-                            <a
-                              href={`https://www.google.com/maps?q=${safeRender(sub["Latitude0"])},${safeRender(sub["Longitude0"])}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="px-3 py-1.5 bg-green-500/10 hover:bg-green-500/20 text-green-400 rounded-lg transition-colors text-xs font-medium flex items-center gap-2 w-fit"
-                            >
-                              <MapPin size={14} />
-                              Ver no Mapa
-                            </a>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-y-2 gap-x-4 text-sm text-white/80 mt-3">
+                          {!isSimplified && (
+                            <div><span className="text-white/50 block text-xs">CPF</span> {safeRender(sub["CPF"]) || "-"}</div>
                           )}
+                          <div><span className="text-white/50 block text-xs">Bairro</span> {safeRender(sub["BAIRRO"])}</div>
+                          <div><span className="text-white/50 block text-xs">Cidade</span> {safeRender(sub["CIDADE"])}</div>
+                          {isSimplified && statusVisita && (
+                            <div><span className="text-white/50 block text-xs">Status</span> {statusVisita}</div>
+                          )}
+                          <div className="col-span-2 sm:col-span-3">
+                            <span className="text-white/50 block text-xs">Endereço</span> 
+                            {safeRender(sub["TIPODELOGRADOURO"])} {safeRender(sub["LOGRADOURO"])}, {safeRender(sub["N_x00da_MERO"])} {safeRender(sub["COMPLEMENTO"])}
+                          </div>
+                          <div className="col-span-2 sm:col-span-3 mt-2 flex flex-wrap gap-2">
+                            <button
+                              onClick={() => setSelectedSubmissionForImages(sub)}
+                              className="px-3 py-1.5 bg-[#00aeef]/15 hover:bg-[#00aeef]/20 text-[#00aeef] rounded-lg transition-colors text-xs font-medium flex items-center gap-2 w-fit"
+                            >
+                              <ImageIcon size={14} />
+                              Ver Imagens
+                            </button>
+                            {sub["Latitude0"] && sub["Longitude0"] && (
+                              <a
+                                href={`https://www.google.com/maps?q=${safeRender(sub["Latitude0"])},${safeRender(sub["Longitude0"])}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-3 py-1.5 bg-green-500/10 hover:bg-green-500/20 text-green-400 rounded-lg transition-colors text-xs font-medium flex items-center gap-2 w-fit"
+                              >
+                                <MapPin size={14} />
+                                Ver no Mapa
+                              </a>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -452,7 +482,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
                   { key: 'OUTRAS1', label: 'Outras 3' },
                 ].map((imgField) => {
                   const imgDataRaw = selectedSubmissionForImages[imgField.key];
-                  const imgData = safeRender(imgDataRaw);
+                  const imgData = extractImage(imgDataRaw);
                   
                   if (!imgData || imgData === '""' || imgData === '{}') return null;
                   
@@ -471,7 +501,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
                 })}
                 {/* Fallback if no images are present */}
                 {![ 'FACHADA', 'FOTOCADUNICO', 'FOTODAFRENTEDODOCUMENTO0', 'FOTODOVERSODODOCUMENTO', 'FOLHADEADES_x00c3_O', 'OUTRAS', 'OUTRAS0', 'OUTRAS1' ].some(key => {
-                  const data = safeRender(selectedSubmissionForImages[key]);
+                  const data = extractImage(selectedSubmissionForImages[key]);
                   return data && data !== '""' && data !== '{}';
                 }) && (
                   <div className="col-span-full text-center p-8 text-white/50">
