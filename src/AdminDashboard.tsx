@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Users, UserPlus, Trash2, LogOut, Loader2, List, X, Image as ImageIcon, MapPin } from 'lucide-react';
+import { Users, UserPlus, Trash2, LogOut, Loader2, List, X, MapPin } from 'lucide-react';
 
 interface AdminDashboardProps {
   onLogout: () => void;
@@ -23,7 +23,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [userSubmissions, setUserSubmissions] = useState<any[]>([]);
   const [isLoadingSubmissions, setIsLoadingSubmissions] = useState(false);
-  const [selectedSubmissionForImages, setSelectedSubmissionForImages] = useState<any>(null);
+
 
   const fetchUsers = async () => {
     try {
@@ -160,24 +160,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
     if (val === null || val === undefined) return "";
     if (typeof val === 'object') {
       return val.Value || val.value || JSON.stringify(val);
-    }
-    return String(val);
-  };
-
-  const extractImage = (val: any): string => {
-    if (!val) return "";
-    if (typeof val === 'string') {
-      try {
-        const parsed = JSON.parse(val);
-        if (parsed.serverRelativeUrl || parsed.serverUrl) return (parsed.serverUrl || "") + (parsed.serverRelativeUrl || "");
-        if (parsed.Url || parsed.url || parsed.Value || parsed.value) return parsed.Url || parsed.url || parsed.Value || parsed.value;
-      } catch (e) {
-        return val;
-      }
-    }
-    if (typeof val === 'object') {
-      if (val.serverRelativeUrl || val.serverUrl) return (val.serverUrl || "") + (val.serverRelativeUrl || "");
-      if (val.Url || val.url || val.Value || val.value) return val.Url || val.url || val.Value || val.value;
     }
     return String(val);
   };
@@ -418,13 +400,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
                             {safeRender(sub["TIPODELOGRADOURO"])} {safeRender(sub["LOGRADOURO"])}, {safeRender(sub["N_x00da_MERO"])} {safeRender(sub["COMPLEMENTO"])}
                           </div>
                           <div className="col-span-2 sm:col-span-3 mt-2 flex flex-wrap gap-2">
-                            <button
-                              onClick={() => setSelectedSubmissionForImages(sub)}
-                              className="px-3 py-1.5 bg-[#00aeef]/15 hover:bg-[#00aeef]/20 text-[#00aeef] rounded-lg transition-colors text-xs font-medium flex items-center gap-2 w-fit"
-                            >
-                              <ImageIcon size={14} />
-                              Ver Imagens
-                            </button>
                             {sub["Latitude0"] && sub["Longitude0"] && (
                               <a
                                 href={`https://www.google.com/maps?q=${safeRender(sub["Latitude0"])},${safeRender(sub["Longitude0"])}`}
@@ -443,72 +418,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
                   })}
                 </div>
               )}
-            </div>
-          </motion.div>
-        </div>
-      )}
-
-      {/* Images Modal */}
-      {selectedSubmissionForImages && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-[#002836] border border-white/10 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl"
-          >
-            <div className="flex items-center justify-between p-6 border-b border-white/10 shrink-0">
-              <div>
-                <h2 className="text-xl font-bold">Imagens do Cadastro</h2>
-                <p className="text-sm text-[#00aeef] mt-1">{safeRender(selectedSubmissionForImages["NOMECOMPLETO"]) || "Sem Nome"}</p>
-              </div>
-              <button 
-                onClick={() => setSelectedSubmissionForImages(null)}
-                className="p-2 hover:bg-white/10 rounded-full transition-colors text-white/60 hover:text-white"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            
-            <div className="p-6 overflow-y-auto flex-1 custom-scrollbar">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                {[
-                  { key: 'FACHADA', label: 'Fachada' },
-                  { key: 'FOTOCADUNICO', label: 'CadÚnico' },
-                  { key: 'FOTODAFRENTEDODOCUMENTO0', label: 'Documento (Frente)' },
-                  { key: 'FOTODOVERSODODOCUMENTO', label: 'Documento (Verso)' },
-                  { key: 'FOLHADEADES_x00c3_O', label: 'Folha de Adesão' },
-                  { key: 'OUTRAS', label: 'Outras 1' },
-                  { key: 'OUTRAS0', label: 'Outras 2' },
-                  { key: 'OUTRAS1', label: 'Outras 3' },
-                ].map((imgField) => {
-                  const imgDataRaw = selectedSubmissionForImages[imgField.key];
-                  const imgData = extractImage(imgDataRaw);
-                  
-                  if (!imgData || imgData === '""' || imgData === '{}') return null;
-                  
-                  return (
-                    <div key={imgField.key} className="flex flex-col gap-2">
-                      <span className="font-medium text-[#00aeef]">{imgField.label}</span>
-                      <div className="relative aspect-video bg-black/40 rounded-xl overflow-hidden border border-white/10 flex items-center justify-center p-2">
-                        <img 
-                          src={imgData} 
-                          alt={imgField.label} 
-                          className="max-w-full max-h-full object-contain rounded-lg"
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-                {/* Fallback if no images are present */}
-                {![ 'FACHADA', 'FOTOCADUNICO', 'FOTODAFRENTEDODOCUMENTO0', 'FOTODOVERSODODOCUMENTO', 'FOLHADEADES_x00c3_O', 'OUTRAS', 'OUTRAS0', 'OUTRAS1' ].some(key => {
-                  const data = extractImage(selectedSubmissionForImages[key]);
-                  return data && data !== '""' && data !== '{}';
-                }) && (
-                  <div className="col-span-full text-center p-8 text-white/50">
-                    Nenhuma imagem encontrada neste cadastro.
-                  </div>
-                )}
-              </div>
             </div>
           </motion.div>
         </div>
