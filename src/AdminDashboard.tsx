@@ -374,7 +374,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
                 <div className="flex flex-col gap-4">
                   {userSubmissions.map((sub, idx) => {
                     const statusVisita = safeRender(sub["STATUSDAVISITA"]);
-                    const isSimplified = ['Ausente', 'Inexistente', 'Recusa', 'Lote Vago', 'Lote'].includes(statusVisita);
+                    const isSimplified = ['Ausente', 'Inexistente', 'Recusa', 'Lote Vago', 'Lote', 'Desabilitado'].includes(statusVisita);
                     const nomeStr = safeRender(sub["NOMECOMPLETO"]);
                     const titleText = nomeStr || (isSimplified ? statusVisita : "Sem Nome");
 
