@@ -19,19 +19,20 @@ const SUMMARY_KEYS = new Set([
   'LOGRADOURO', 'N_x00da_MERO', 'COMPLEMENTO', 'Latitude0', 'Longitude0', 'Data',
 ]);
 
-// Fotos que entram no PDF (coluna do SharePoint -> título)
-const PDF_PHOTOS: { key: string; label: string }[] = [
-  { key: 'FACHADA', label: 'Fachada' },
-  { key: 'FOTODAFRENTEDODOCUMENTO0', label: 'Documento - Frente' },
-  { key: 'FOTODOVERSODODOCUMENTO', label: 'Documento - Verso' },
-  { key: 'FOLHADEADES_x00c3_O', label: 'Folha de Adesão' },
-  { key: 'OUTRAS1', label: 'Folha de Adesão 2' },
+// Fotos que entram no PDF (aceita tanto o nome da coluna quanto chaves diretas do fluxo)
+const PDF_PHOTOS: { keys: string[]; label: string }[] = [
+  { keys: ['fachada', 'FACHADA'], label: 'Fachada' },
+  { keys: ['frenteDoc', 'FOTODAFRENTEDODOCUMENTO0'], label: 'Documento - Frente' },
+  { keys: ['versoDoc', 'FOTODOVERSODODOCUMENTO'], label: 'Documento - Verso' },
+  { keys: ['adesao1', 'FOLHADEADES_x00c3_O'], label: 'Folha de Adesão' },
+  { keys: ['adesao2', 'OUTRAS1'], label: 'Folha de Adesão 2' },
 ];
 
 // Todas as colunas de imagem (nunca entram na tabela de texto)
 const IMAGE_KEYS = new Set([
   'FOTOCADUNICO', 'FOTODAFRENTEDODOCUMENTO0', 'FOTODOVERSODODOCUMENTO',
   'FACHADA', 'FOLHADEADES_x00c3_O', 'OUTRAS', 'OUTRAS0', 'OUTRAS1',
+  'fachada', 'frenteDoc', 'versoDoc', 'adesao1', 'adesao2',
 ]);
 
 const getItemId = (sub: any): string => {
@@ -50,17 +51,39 @@ const fetchSubmissionDetails = async (url: string, sub: any): Promise<any | null
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = await response.json();
-  // Aceita o item direto ou embrulhado em { body: ... } / { item: ... }
-  return data?.body ?? data?.item ?? data;
+  // Se vier { item: {...}, fachada: ..., ... }, mescla item com as fotos do topo
+  if (data?.item && typeof data.item === 'object') {
+    const { item, ...rest } = data;
+    return { ...item, ...rest };
+  }
+  return data?.body ?? data;
 };
 
 type PreparedImage = { dataUrl: string; width: number; height: number };
 
+// Extrai string Base64 ou Data URI de qualquer formato retornado pelo Power Automate
+const extractImageString = (raw: any): string => {
+  if (!raw) return '';
+  if (typeof raw === 'string') return raw.trim();
+  if (typeof raw === 'object') {
+    // Formato padrão do "Get file content" do Power Automate: { "$content-type": "image/jpeg", "$content": "/9j/4AAQ..." }
+    if (typeof raw['$content'] === 'string') {
+      const mime = raw['$content-type'] || 'image/jpeg';
+      return `data:${mime};base64,${raw['$content']}`;
+    }
+    if (typeof raw.body?.['$content'] === 'string') {
+      const mime = raw.body['$content-type'] || 'image/jpeg';
+      return `data:${mime};base64,${raw.body['$content']}`;
+    }
+  }
+  return '';
+};
+
 // Converte a foto em JPEG reduzido (deixa o PDF leve) e devolve as dimensões
-const prepareImage = (raw: string): Promise<PreparedImage | null> => {
-  const value = raw.trim();
-  // Ignora vazios e a imagem 1x1 transparente que o app envia quando não há foto
-  if (value.length < 500) return Promise.resolve(null);
+const prepareImage = (rawInput: any): Promise<PreparedImage | null> => {
+  const value = extractImageString(rawInput);
+  // Ignora vazios e a imagem 1x1 transparente (68 bytes) que o app envia quando não há foto
+  if (value.length < 300) return Promise.resolve(null);
   const src = value.startsWith('data:') ? value : `data:image/jpeg;base64,${value}`;
 
   return new Promise((resolve) => {
@@ -346,7 +369,7 @@ export const exportSubmissionsPdf = async (
     if (withPhotos) {
       const photos: { label: string; img: PreparedImage }[] = [];
       for (const photo of PDF_PHOTOS) {
-        const raw = safeText(sub[photo.key]);
+        const raw = photo.keys.map((k) => sub[k]).find((v) => v !== undefined && v !== null && v !== '');
         if (!raw) continue;
         const img = await prepareImage(raw);
         if (img) photos.push({ label: photo.label, img });
