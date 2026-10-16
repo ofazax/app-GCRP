@@ -33,8 +33,103 @@ const decodeKey = (key: string): string =>
   key
     .replace(/_x([0-9a-fA-F]{4})_/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
     .replace(/_/g, ' ')
-    .trim()
+    .trim();
+
+// Normaliza para comparação: sem acento, sem espaço/pontuação, maiúsculo
+const normalizeKey = (key: string): string =>
+  decodeKey(key)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]/g, '')
     .toUpperCase();
+
+// Nomes amigáveis, na ordem em que aparecem no formulário de adesão
+const FIELD_LABELS: [string, string][] = [
+  ['AGENTE', 'Agente'],
+  ['AGENDAMENTODAOBRA', 'Agendamento da Obra'],
+  ['AGENDAMENTOOBRA', 'Agendamento da Obra'],
+  ['ENTRENUMEROS', 'Entre Números'],
+  ['TIPODECOMPLEMENTO', 'Tipo de Complemento'],
+  ['ZEIS', 'ZEIS'],
+  ['RG', 'RG'],
+  ['DATADENASCIMENTO', 'Data de Nascimento'],
+  ['TELEFONE', 'Telefone'],
+  ['EMAIL', 'E-mail'],
+  ['TEMCADUNICO', 'Possui CadÚnico?'],
+  ['CADUNICO', 'Possui CadÚnico?'],
+  ['MATRICULA', 'Matrícula'],
+  ['IDENTIFICADOR', 'Identificador'],
+  ['NUMERODOHIDROMETRO', 'Número do Hidrômetro'],
+  ['NUMEROHIDROMETRO', 'Número do Hidrômetro'],
+  ['NUMERODEECONOMIAS', 'Número de Economias'],
+  ['NUMEROECONOMIAS', 'Número de Economias'],
+  ['TIPODEADESAO', 'Tipo de Adesão'],
+  ['TIPODELIGACAO', 'Tipo de Ligação'],
+  ['PAVIMENTOINTERNO', 'Pavimento Interno'],
+  ['PAVIMENTOEXTERNO', 'Pavimento Externo'],
+  ['SITUACAODOESGOTAMENTO', 'Situação do Esgotamento'],
+  ['SITUACAOESGOTAMENTO', 'Situação do Esgotamento'],
+  ['OBSERVACOES', 'Observações'],
+  ['ENVIADOCONSORCIO', 'Enviado ao Consórcio?'],
+  ['ENVIADOAOCONSORCIO', 'Enviado ao Consórcio?'],
+];
+const LABEL_MAP = new Map(FIELD_LABELS);
+const ORDER_MAP = new Map(FIELD_LABELS.map(([k], i) => [k, i]));
+
+// Fallback: "PAVIMENTO INTERNO" -> "Pavimento Interno"
+const SMALL_WORDS = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'ao', 'a', 'o']);
+const toTitleCase = (text: string): string =>
+  text
+    .toLowerCase()
+    .split(/\s+/)
+    .map((w, i) => (i > 0 && SMALL_WORDS.has(w) ? w : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(' ');
+
+const labelFor = (key: string): string => {
+  const norm = normalizeKey(key);
+  const normNoQuestion = norm.replace(/\?$/, '');
+  return LABEL_MAP.get(norm) ?? LABEL_MAP.get(normNoQuestion) ?? toTitleCase(decodeKey(key));
+};
+
+const orderFor = (key: string): number => ORDER_MAP.get(normalizeKey(key)) ?? 999;
+
+// Formata valores no padrão brasileiro
+const formatValue = (key: string, value: string): string => {
+  const lower = value.toLowerCase();
+  if (lower === 'true') return 'Sim';
+  if (lower === 'false') return 'Não';
+
+  // Data pura: 2002-01-18 -> 18/01/2002
+  const dateOnly = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnly) return `${dateOnly[3]}/${dateOnly[2]}/${dateOnly[1]}`;
+
+  // Data com hora (ISO): 2002-01-18T00:00:00Z
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) {
+    const d = new Date(value);
+    if (!isNaN(d.getTime())) {
+      // Datas sem hora relevante (meia-noite UTC) viram só a data
+      if (/T00:00:00(\.0+)?Z?$/.test(value)) {
+        const [y, m, day] = value.slice(0, 10).split('-');
+        return `${day}/${m}/${y}`;
+      }
+      return formatDateTime(d);
+    }
+  }
+
+  const norm = normalizeKey(key);
+  const digits = value.replace(/\D/g, '');
+  if (norm === 'CPF' && digits.length === 11) {
+    return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+  }
+  if (norm === 'TELEFONE') {
+    if (digits.length === 11) return digits.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
+    if (digits.length === 10) return digits.replace(/(\d{2})(\d{4})(\d{4})/, '($1) $2-$3');
+  }
+  return value;
+};
+
+const formatDateTime = (d: Date): string =>
+  `${d.toLocaleDateString('pt-BR')} às ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
 
 const isSkippedKey = (key: string): boolean =>
   SYSTEM_KEYS.has(key) ||
@@ -53,9 +148,10 @@ const formatDate = (sub: any): string => {
   const raw = sub.created_at || sub.Created;
   if (raw) {
     const d = new Date(raw);
-    if (!isNaN(d.getTime())) return d.toLocaleString('pt-BR');
+    if (!isNaN(d.getTime())) return formatDateTime(d);
   }
-  return safeText(sub['Data']);
+  const data = safeText(sub['Data']);
+  return data ? formatValue('Data', data) : '';
 };
 
 export const exportSubmissionsPdf = (submissions: any[], collaboratorName: string) => {
@@ -74,7 +170,7 @@ export const exportSubmissionsPdf = (submissions: any[], collaboratorName: strin
   doc.setFontSize(10);
   doc.text(`Colaborador: ${collaboratorName}`, margin, 19);
   doc.text(
-    `Gerado em: ${new Date().toLocaleString('pt-BR')}  |  ${submissions.length} registro(s)`,
+    `Gerado em: ${formatDateTime(new Date())}  |  ${submissions.length} registro(s)`,
     margin,
     24,
   );
@@ -99,20 +195,20 @@ export const exportSubmissionsPdf = (submissions: any[], collaboratorName: strin
 
     const rows: [string, string][] = [];
     if (status) rows.push(['Status da Visita', status]);
-    if (!isSimplified) rows.push(['CPF', safeText(sub['CPF']) || '-']);
+    if (!isSimplified) rows.push(['CPF', formatValue('CPF', safeText(sub['CPF'])) || '-']);
     rows.push(['Bairro', safeText(sub['BAIRRO']) || '-']);
     rows.push(['Cidade', safeText(sub['CIDADE']) || '-']);
     rows.push(['Endereço', endereco || '-']);
     if (lat && lng) rows.push(['Localização', `${lat}, ${lng}`]);
 
-    // Demais campos preenchidos
+    // Demais campos preenchidos (na ordem do formulário)
     Object.keys(sub)
       .filter((key) => !isSkippedKey(key))
-      .sort()
+      .sort((a, b) => orderFor(a) - orderFor(b) || labelFor(a).localeCompare(labelFor(b), 'pt-BR'))
       .forEach((key) => {
         const value = safeText(sub[key]);
         if (!value || isImageOrHugeValue(value)) return;
-        rows.push([decodeKey(key), value]);
+        rows.push([labelFor(key), formatValue(key, value)]);
       });
 
     // Quebra de página se o título não couber
@@ -164,3 +260,4 @@ export const exportSubmissionsPdf = (submissions: any[], collaboratorName: strin
   const today = new Date().toISOString().slice(0, 10);
   doc.save(`Adesoes_${safeName}_${today}.pdf`);
 };
+
