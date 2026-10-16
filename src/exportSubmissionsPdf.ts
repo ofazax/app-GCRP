@@ -19,6 +19,71 @@ const SUMMARY_KEYS = new Set([
   'LOGRADOURO', 'N_x00da_MERO', 'COMPLEMENTO', 'Latitude0', 'Longitude0', 'Data',
 ]);
 
+// Fotos que entram no PDF (coluna do SharePoint -> título)
+const PDF_PHOTOS: { key: string; label: string }[] = [
+  { key: 'FACHADA', label: 'Fachada' },
+  { key: 'FOTODAFRENTEDODOCUMENTO0', label: 'Documento - Frente' },
+  { key: 'FOTODOVERSODODOCUMENTO', label: 'Documento - Verso' },
+  { key: 'FOLHADEADES_x00c3_O', label: 'Folha de Adesão' },
+  { key: 'OUTRAS1', label: 'Folha de Adesão 2' },
+];
+
+// Todas as colunas de imagem (nunca entram na tabela de texto)
+const IMAGE_KEYS = new Set([
+  'FOTOCADUNICO', 'FOTODAFRENTEDODOCUMENTO0', 'FOTODOVERSODODOCUMENTO',
+  'FACHADA', 'FOLHADEADES_x00c3_O', 'OUTRAS', 'OUTRAS0', 'OUTRAS1',
+]);
+
+const getItemId = (sub: any): string => {
+  const id = sub?.ID ?? sub?.Id ?? sub?.id ?? sub?.ItemInternalId;
+  return id === undefined || id === null ? '' : String(id);
+};
+
+// Busca o item completo (todas as colunas + fotos) no fluxo "GCRP - Detalhes da Adesão"
+const fetchSubmissionDetails = async (url: string, sub: any): Promise<any | null> => {
+  const id = getItemId(sub);
+  if (!id) return null;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const data = await response.json();
+  // Aceita o item direto ou embrulhado em { body: ... } / { item: ... }
+  return data?.body ?? data?.item ?? data;
+};
+
+type PreparedImage = { dataUrl: string; width: number; height: number };
+
+// Converte a foto em JPEG reduzido (deixa o PDF leve) e devolve as dimensões
+const prepareImage = (raw: string): Promise<PreparedImage | null> => {
+  const value = raw.trim();
+  // Ignora vazios e a imagem 1x1 transparente que o app envia quando não há foto
+  if (value.length < 500) return Promise.resolve(null);
+  const src = value.startsWith('data:') ? value : `data:image/jpeg;base64,${value}`;
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      if (img.naturalWidth < 10 || img.naturalHeight < 10) return resolve(null);
+      const maxSide = 1400;
+      const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.naturalWidth * scale);
+      canvas.height = Math.round(img.naturalHeight * scale);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return resolve(null);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve({ dataUrl: canvas.toDataURL('image/jpeg', 0.75), width: canvas.width, height: canvas.height });
+    };
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+};
+
 const safeText = (val: any): string => {
   if (val === null || val === undefined) return '';
   if (Array.isArray(val)) return val.map(safeText).filter(Boolean).join(', ');
@@ -134,6 +199,7 @@ const formatDateTime = (d: Date): string =>
 const isSkippedKey = (key: string): boolean =>
   SYSTEM_KEYS.has(key) ||
   SUMMARY_KEYS.has(key) ||
+  IMAGE_KEYS.has(key) ||
   key.startsWith('@') ||
   key.startsWith('{') ||
   key.startsWith('odata') ||
@@ -141,8 +207,9 @@ const isSkippedKey = (key: string): boolean =>
   key.includes('#') ||
   /^foto/i.test(key);
 
+// Base64 sem espaços = imagem/arquivo; textos longos (ex.: Observações) continuam aparecendo
 const isImageOrHugeValue = (value: string): boolean =>
-  value.startsWith('data:') || value.length > 1500;
+  value.startsWith('data:') || (value.length > 3000 && !/\s/.test(value));
 
 const formatDate = (sub: any): string => {
   const raw = sub.created_at || sub.Created;
@@ -154,10 +221,29 @@ const formatDate = (sub: any): string => {
   return data ? formatValue('Data', data) : '';
 };
 
-export const exportSubmissionsPdf = (submissions: any[], collaboratorName: string) => {
+export interface ExportOptions {
+  /** URL do fluxo "GCRP - Detalhes da Adesão". Sem ela, o PDF sai sem fotos. */
+  detailsUrl?: string;
+  onProgress?: (done: number, total: number) => void;
+}
+
+export interface ExportResult {
+  photosAdded: number;
+  detailsFailed: number;
+}
+
+export const exportSubmissionsPdf = async (
+  submissions: any[],
+  collaboratorName: string,
+  options: ExportOptions = {},
+): Promise<ExportResult> => {
+  const { detailsUrl, onProgress } = options;
+  const withPhotos = Boolean(detailsUrl);
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 14;
+  const result: ExportResult = { photosAdded: 0, detailsFailed: 0 };
 
   // Cabeçalho
   doc.setFillColor(0, 40, 54);
@@ -177,7 +263,22 @@ export const exportSubmissionsPdf = (submissions: any[], collaboratorName: strin
 
   let cursorY = 36;
 
-  submissions.forEach((sub, idx) => {
+  for (let idx = 0; idx < submissions.length; idx++) {
+    onProgress?.(idx, submissions.length);
+
+    // Busca todas as colunas + fotos do item
+    let sub = submissions[idx];
+    if (detailsUrl) {
+      try {
+        const details = await fetchSubmissionDetails(detailsUrl, sub);
+        if (details && typeof details === 'object') sub = { ...sub, ...details };
+        else result.detailsFailed++;
+      } catch (err) {
+        console.error('Falha ao buscar detalhes do item', getItemId(sub), err);
+        result.detailsFailed++;
+      }
+    }
+
     const status = safeText(sub['STATUSDAVISITA']);
     const isSimplified = SIMPLIFIED_STATUSES.includes(status);
     const nome = safeText(sub['NOMECOMPLETO']);
@@ -211,8 +312,8 @@ export const exportSubmissionsPdf = (submissions: any[], collaboratorName: strin
         rows.push([labelFor(key), formatValue(key, value)]);
       });
 
-    // Quebra de página se o título não couber
-    if (cursorY > doc.internal.pageSize.getHeight() - 40) {
+    // Com fotos, cada cliente começa em uma página nova
+    if ((withPhotos && idx > 0) || cursorY > pageHeight - 40) {
       doc.addPage();
       cursorY = 20;
     }
@@ -239,8 +340,75 @@ export const exportSubmissionsPdf = (submissions: any[], collaboratorName: strin
       },
     });
 
-    cursorY = (doc as any).lastAutoTable.finalY + 10;
-  });
+    cursorY = (doc as any).lastAutoTable.finalY + 8;
+
+    // Fotos (grade de 2 colunas)
+    if (withPhotos) {
+      const photos: { label: string; img: PreparedImage }[] = [];
+      for (const photo of PDF_PHOTOS) {
+        const raw = safeText(sub[photo.key]);
+        if (!raw) continue;
+        const img = await prepareImage(raw);
+        if (img) photos.push({ label: photo.label, img });
+      }
+
+      if (photos.length > 0) {
+        const gap = 6;
+        const cellW = (pageWidth - margin * 2 - gap) / 2;
+        const maxImgH = 95;
+        const labelH = 6;
+
+        if (cursorY > pageHeight - 40) {
+          doc.addPage();
+          cursorY = 20;
+        }
+        doc.setTextColor(0, 120, 170);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.text('Fotos', margin, cursorY);
+        cursorY += 4;
+
+        for (let p = 0; p < photos.length; p += 2) {
+          const pair = photos.slice(p, p + 2).map(({ label, img }) => {
+            const ratio = img.width / img.height;
+            let w = cellW;
+            let h = w / ratio;
+            if (h > maxImgH) {
+              h = maxImgH;
+              w = h * ratio;
+            }
+            return { label, img, w, h };
+          });
+          const rowH = labelH + Math.max(...pair.map((x) => x.h)) + 6;
+
+          if (cursorY + rowH > pageHeight - 14) {
+            doc.addPage();
+            cursorY = 20;
+          }
+
+          pair.forEach((item, col) => {
+            const cellX = margin + col * (cellW + gap);
+            doc.setTextColor(60, 60, 60);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(9);
+            doc.text(item.label, cellX, cursorY + 4);
+            const imgX = cellX + (cellW - item.w) / 2;
+            const imgY = cursorY + labelH;
+            doc.addImage(item.img.dataUrl, 'JPEG', imgX, imgY, item.w, item.h, undefined, 'FAST');
+            doc.setDrawColor(210, 210, 210);
+            doc.rect(imgX, imgY, item.w, item.h);
+            result.photosAdded++;
+          });
+
+          cursorY += rowH;
+        }
+      }
+    }
+
+    cursorY += 4;
+  }
+
+  onProgress?.(submissions.length, submissions.length);
 
   // Rodapé com numeração de páginas
   const pageCount = doc.getNumberOfPages();
@@ -248,16 +416,13 @@ export const exportSubmissionsPdf = (submissions: any[], collaboratorName: strin
     doc.setPage(i);
     doc.setFontSize(8);
     doc.setTextColor(150, 150, 150);
-    doc.text(
-      `Página ${i} de ${pageCount}`,
-      pageWidth - margin,
-      doc.internal.pageSize.getHeight() - 8,
-      { align: 'right' },
-    );
+    doc.text(`Página ${i} de ${pageCount}`, pageWidth - margin, pageHeight - 8, { align: 'right' });
   }
 
   const safeName = collaboratorName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '_');
   const today = new Date().toISOString().slice(0, 10);
   doc.save(`Adesoes_${safeName}_${today}.pdf`);
+  return result;
 };
+
 

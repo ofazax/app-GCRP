@@ -23,6 +23,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [userSubmissions, setUserSubmissions] = useState<any[]>([]);
   const [isLoadingSubmissions, setIsLoadingSubmissions] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [exportProgress, setExportProgress] = useState('');
 
 
   const fetchUsers = async () => {
@@ -356,20 +358,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
               <div className="flex items-center gap-2">
                 <button
                   onClick={async () => {
+                    setIsExportingPdf(true);
+                    setExportProgress('');
                     try {
+                      const detailsUrl = import.meta.env.VITE_PA_DETAILS_WEBHOOK_URL;
                       const { exportSubmissionsPdf } = await import('./exportSubmissionsPdf');
-                      exportSubmissionsPdf(userSubmissions, selectedUser.name);
+                      await exportSubmissionsPdf(userSubmissions, selectedUser.name, {
+                        detailsUrl: detailsUrl && !detailsUrl.includes('COLE_AQUI') ? detailsUrl : undefined,
+                        onProgress: (done, total) => setExportProgress(`${done}/${total}`),
+                      });
                     } catch (err) {
                       console.error(err);
                       alert('Erro ao gerar o PDF.');
+                    } finally {
+                      setIsExportingPdf(false);
+                      setExportProgress('');
                     }
                   }}
-                  disabled={isLoadingSubmissions || userSubmissions.length === 0}
+                  disabled={isLoadingSubmissions || isExportingPdf || userSubmissions.length === 0}
                   className="flex items-center gap-2 px-3 py-2 bg-[#00aeef]/15 hover:bg-[#00aeef]/25 text-[#00aeef] rounded-lg transition-colors text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed"
                   title="Exportar cadastros em PDF"
                 >
-                  <FileDown size={16} />
-                  <span className="hidden sm:inline">Exportar PDF</span>
+                  {isExportingPdf ? <Loader2 size={16} className="animate-spin" /> : <FileDown size={16} />}
+                  <span className="hidden sm:inline">
+                    {isExportingPdf ? `Gerando ${exportProgress}...` : 'Exportar PDF'}
+                  </span>
                 </button>
                 <button 
                   onClick={() => setSelectedUser(null)}
