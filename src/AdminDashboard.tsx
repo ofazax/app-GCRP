@@ -361,10 +361,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
                     setIsExportingPdf(true);
                     setExportProgress('');
                     try {
-                      const detailsUrl = import.meta.env.VITE_PA_DETAILS_WEBHOOK_URL;
+                      const envDetailsUrl = import.meta.env.VITE_PA_DETAILS_WEBHOOK_URL;
+                      const detailsUrl =
+                        envDetailsUrl && !envDetailsUrl.includes('COLE_AQUI')
+                          ? envDetailsUrl
+                          : 'https://defaultc1880ac0d27949d8af71b4b7b31bf6.19.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/14/workflows/db92777a47f04d4da3b2eba08befd02c/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=LKhr2RRfQyp9lTcphwZAcUCUjfzw3JfYK_7Yb68t2AM';
                       const { exportSubmissionsPdf } = await import('./exportSubmissionsPdf');
                       await exportSubmissionsPdf(userSubmissions, selectedUser.name, {
-                        detailsUrl: detailsUrl && !detailsUrl.includes('COLE_AQUI') ? detailsUrl : undefined,
+                        detailsUrl,
                         onProgress: (done, total) => setExportProgress(`${done}/${total}`),
                       });
                     } catch (err) {
