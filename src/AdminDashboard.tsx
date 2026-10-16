@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Users, UserPlus, Trash2, LogOut, Loader2, List, X, MapPin } from 'lucide-react';
+import { Users, UserPlus, Trash2, LogOut, Loader2, List, X, MapPin, FileDown } from 'lucide-react';
 
 interface AdminDashboardProps {
   onLogout: () => void;
@@ -353,12 +353,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
                 <h2 className="text-xl font-bold">Cadastros de {selectedUser.name}</h2>
                 <p className="text-sm text-[#00aeef] mt-1">{userSubmissions.length} registro(s) encontrado(s)</p>
               </div>
-              <button 
-                onClick={() => setSelectedUser(null)}
-                className="p-2 hover:bg-white/10 rounded-full transition-colors text-white/60 hover:text-white"
-              >
-                <X size={20} />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={async () => {
+                    try {
+                      const { exportSubmissionsPdf } = await import('./exportSubmissionsPdf');
+                      exportSubmissionsPdf(userSubmissions, selectedUser.name);
+                    } catch (err) {
+                      console.error(err);
+                      alert('Erro ao gerar o PDF.');
+                    }
+                  }}
+                  disabled={isLoadingSubmissions || userSubmissions.length === 0}
+                  className="flex items-center gap-2 px-3 py-2 bg-[#00aeef]/15 hover:bg-[#00aeef]/25 text-[#00aeef] rounded-lg transition-colors text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Exportar cadastros em PDF"
+                >
+                  <FileDown size={16} />
+                  <span className="hidden sm:inline">Exportar PDF</span>
+                </button>
+                <button 
+                  onClick={() => setSelectedUser(null)}
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors text-white/60 hover:text-white"
+                >
+                  <X size={20} />
+                </button>
+              </div>
             </div>
             
             <div className="p-6 overflow-y-auto flex-1 custom-scrollbar">
