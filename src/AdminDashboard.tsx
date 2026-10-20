@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Users, UserPlus, Trash2, LogOut, Loader2, List, X, MapPin, FileDown } from 'lucide-react';
+import { Users, UserPlus, Trash2, LogOut, Loader2, List, X, MapPin, FileDown, Search, Calendar, CheckSquare, Square } from 'lucide-react';
 
 interface AdminDashboardProps {
   onLogout: () => void;
@@ -25,6 +25,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
   const [isLoadingSubmissions, setIsLoadingSubmissions] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [exportProgress, setExportProgress] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterDateStart, setFilterDateStart] = useState('');
+  const [filterDateEnd, setFilterDateEnd] = useState('');
+  const [selectedSubKeys, setSelectedSubKeys] = useState<Set<string>>(new Set());
 
 
   const fetchUsers = async () => {
@@ -130,6 +134,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
 
   const handleViewSubmissions = async (user: any) => {
     setSelectedUser(user);
+    setUserSubmissions([]);
+    setSearchTerm('');
+    setFilterDateStart('');
+    setFilterDateEnd('');
+    setSelectedSubKeys(new Set());
     setIsLoadingSubmissions(true);
     try {
       const webhookUrl = import.meta.env.VITE_PA_API_WEBHOOK_URL;
@@ -164,6 +173,128 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
       return val.Value || val.value || JSON.stringify(val);
     }
     return String(val);
+  };
+
+  const getSubKey = (sub: any, idx: number): string => {
+    const id = sub?.ID ?? sub?.Id ?? sub?.id ?? sub?.ItemInternalId ?? sub?._id;
+    return id !== undefined && id !== null && id !== '' ? String(id) : `idx_${idx}`;
+  };
+
+  // Extrai data no formato AAAA-MM-DD para comparação com os filtros de data
+  const getSubDateISO = (sub: any): string => {
+    const dataField = safeRender(sub["Data"]).trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(dataField)) return dataField.slice(0, 10);
+    const brMatch = dataField.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    if (brMatch) return `${brMatch[3]}-${brMatch[2]}-${brMatch[1]}`;
+
+    const raw = sub.created_at || sub.Created;
+    if (raw) {
+      const d = new Date(raw);
+      if (!isNaN(d.getTime())) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      }
+    }
+    return '';
+  };
+
+  const normalizeSearch = (str: string): string =>
+    str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+  const filteredSubmissions = userSubmissions
+    .map((sub, originalIdx) => ({ sub, originalIdx, key: getSubKey(sub, originalIdx) }))
+    .filter(({ sub }) => {
+      // Filtro por data específica ou intervalo de datas
+      if (filterDateStart || filterDateEnd) {
+        const subDate = getSubDateISO(sub);
+        if (!subDate) return false;
+        if (filterDateStart && !filterDateEnd && subDate !== filterDateStart) {
+          return false;
+        }
+        if (filterDateStart && filterDateEnd) {
+          if (subDate < filterDateStart || subDate > filterDateEnd) return false;
+        } else if (!filterDateStart && filterDateEnd) {
+          if (subDate !== filterDateEnd) return false;
+        }
+      }
+
+      // Filtro por pesquisa (Nome, CPF, Endereço, Bairro, Cidade, Matrícula, Status, ID)
+      if (searchTerm.trim()) {
+        const q = normalizeSearch(searchTerm.trim());
+        const qDigits = q.replace(/\D/g, '');
+        const cpfStr = safeRender(sub["CPF"]);
+        const haystack = normalizeSearch([
+          safeRender(sub["NOMECOMPLETO"]),
+          cpfStr,
+          safeRender(sub["STATUSDAVISITA"]),
+          safeRender(sub["BAIRRO"]),
+          safeRender(sub["CIDADE"]),
+          safeRender(sub["TIPODELOGRADOURO"]),
+          safeRender(sub["LOGRADOURO"]),
+          safeRender(sub["N_x00da_MERO"]),
+          safeRender(sub["COMPLEMENTO"]),
+          safeRender(sub["MATR_x00cd_CULA"]),
+          safeRender(sub["ID"] ?? sub["Id"] ?? sub["ItemInternalId"]),
+          getSubDateISO(sub),
+        ].join(' '));
+
+        const matchesText = haystack.includes(q);
+        const matchesDigits = qDigits.length >= 3 && cpfStr.replace(/\D/g, '').includes(qDigits);
+        if (!matchesText && !matchesDigits) return false;
+      }
+
+      return true;
+    });
+
+  const toggleSelectSub = (key: string) => {
+    setSelectedSubKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const allFilteredSelected =
+    filteredSubmissions.length > 0 &&
+    filteredSubmissions.every(item => selectedSubKeys.has(item.key));
+
+  const toggleSelectAllFiltered = () => {
+    setSelectedSubKeys(prev => {
+      const next = new Set(prev);
+      if (allFilteredSelected) {
+        filteredSubmissions.forEach(item => next.delete(item.key));
+      } else {
+        filteredSubmissions.forEach(item => next.add(item.key));
+      }
+      return next;
+    });
+  };
+
+  const handleExportPdf = async (subsToExport: any[]) => {
+    if (subsToExport.length === 0) return;
+    setIsExportingPdf(true);
+    setExportProgress('');
+    try {
+      const envDetailsUrl = import.meta.env.VITE_PA_DETAILS_WEBHOOK_URL;
+      const detailsUrl =
+        envDetailsUrl && !envDetailsUrl.includes('COLE_AQUI')
+          ? envDetailsUrl
+          : 'https://defaultc1880ac0d27949d8af71b4b7b31bf6.19.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/14/workflows/db92777a47f04d4da3b2eba08befd02c/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=LKhr2RRfQyp9lTcphwZAcUCUjfzw3JfYK_7Yb68t2AM';
+      const { exportSubmissionsPdf } = await import('./exportSubmissionsPdf');
+      await exportSubmissionsPdf(subsToExport, selectedUser.name, {
+        detailsUrl,
+        onProgress: (done, total) => setExportProgress(`${done}/${total}`),
+      });
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao gerar o PDF.');
+    } finally {
+      setIsExportingPdf(false);
+      setExportProgress('');
+    }
   };
 
   return (
@@ -348,53 +479,137 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-[#002836] border border-white/10 rounded-2xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl"
+            className="bg-[#002836] border border-white/10 rounded-2xl w-full max-w-3xl max-h-[88vh] flex flex-col shadow-2xl"
           >
-            <div className="flex items-center justify-between p-6 border-b border-white/10">
-              <div>
-                <h2 className="text-xl font-bold">Cadastros de {selectedUser.name}</h2>
-                <p className="text-sm text-[#00aeef] mt-1">{userSubmissions.length} registro(s) encontrado(s)</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={async () => {
-                    setIsExportingPdf(true);
-                    setExportProgress('');
-                    try {
-                      const envDetailsUrl = import.meta.env.VITE_PA_DETAILS_WEBHOOK_URL;
-                      const detailsUrl =
-                        envDetailsUrl && !envDetailsUrl.includes('COLE_AQUI')
-                          ? envDetailsUrl
-                          : 'https://defaultc1880ac0d27949d8af71b4b7b31bf6.19.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/14/workflows/db92777a47f04d4da3b2eba08befd02c/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=LKhr2RRfQyp9lTcphwZAcUCUjfzw3JfYK_7Yb68t2AM';
-                      const { exportSubmissionsPdf } = await import('./exportSubmissionsPdf');
-                      await exportSubmissionsPdf(userSubmissions, selectedUser.name, {
-                        detailsUrl,
-                        onProgress: (done, total) => setExportProgress(`${done}/${total}`),
-                      });
-                    } catch (err) {
-                      console.error(err);
-                      alert('Erro ao gerar o PDF.');
-                    } finally {
-                      setIsExportingPdf(false);
-                      setExportProgress('');
+            <div className="flex flex-col gap-4 p-6 border-b border-white/10">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-xl font-bold">Cadastros de {selectedUser.name}</h2>
+                  <p className="text-sm text-[#00aeef] mt-1">
+                    {filteredSubmissions.length} de {userSubmissions.length} registro(s)
+                    {selectedSubKeys.size > 0 && ` • ${selectedSubKeys.size} selecionado(s)`}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      const subsToExport =
+                        selectedSubKeys.size > 0
+                          ? userSubmissions.filter((sub, idx) => selectedSubKeys.has(getSubKey(sub, idx)))
+                          : filteredSubmissions.map(item => item.sub);
+                      handleExportPdf(subsToExport);
+                    }}
+                    disabled={
+                      isLoadingSubmissions ||
+                      isExportingPdf ||
+                      (selectedSubKeys.size === 0 && filteredSubmissions.length === 0)
                     }
-                  }}
-                  disabled={isLoadingSubmissions || isExportingPdf || userSubmissions.length === 0}
-                  className="flex items-center gap-2 px-3 py-2 bg-[#00aeef]/15 hover:bg-[#00aeef]/25 text-[#00aeef] rounded-lg transition-colors text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed"
-                  title="Exportar cadastros em PDF"
-                >
-                  {isExportingPdf ? <Loader2 size={16} className="animate-spin" /> : <FileDown size={16} />}
-                  <span className="hidden sm:inline">
-                    {isExportingPdf ? `Gerando ${exportProgress}...` : 'Exportar PDF'}
-                  </span>
-                </button>
-                <button 
-                  onClick={() => setSelectedUser(null)}
-                  className="p-2 hover:bg-white/10 rounded-full transition-colors text-white/60 hover:text-white"
-                >
-                  <X size={20} />
-                </button>
+                    className="flex items-center gap-2 px-3 py-2 bg-[#00aeef]/15 hover:bg-[#00aeef]/25 text-[#00aeef] rounded-lg transition-colors text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Exportar cadastros em PDF"
+                  >
+                    {isExportingPdf ? <Loader2 size={16} className="animate-spin" /> : <FileDown size={16} />}
+                    <span className="hidden sm:inline">
+                      {isExportingPdf
+                        ? `Gerando ${exportProgress}...`
+                        : selectedSubKeys.size > 0
+                          ? `Exportar Selecionados (${selectedSubKeys.size})`
+                          : `Exportar PDF (${filteredSubmissions.length})`}
+                    </span>
+                  </button>
+                  <button 
+                    onClick={() => setSelectedUser(null)}
+                    className="p-2 hover:bg-white/10 rounded-full transition-colors text-white/60 hover:text-white"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
               </div>
+
+              {/* Barra de Pesquisa e Filtro por Datas */}
+              {!isLoadingSubmissions && userSubmissions.length > 0 && (
+                <div className="flex flex-col gap-3 pt-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                    <div className="relative sm:col-span-6">
+                      <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" />
+                      <input
+                        type="text"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        placeholder="Pesquisar por nome, CPF, rua, bairro, status..."
+                        className="w-full bg-black/25 border border-white/10 rounded-xl pl-9 pr-8 py-2 text-xs sm:text-sm text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-[#00aeef]/50"
+                      />
+                      {searchTerm && (
+                        <button
+                          onClick={() => setSearchTerm('')}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/40 hover:text-white"
+                          title="Limpar pesquisa"
+                        >
+                          <X size={14} />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="relative sm:col-span-3">
+                      <Calendar size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none" />
+                      <input
+                        type="date"
+                        value={filterDateStart}
+                        onChange={(e) => setFilterDateStart(e.target.value)}
+                        title="Data específica ou Data inicial"
+                        className="w-full bg-black/25 border border-white/10 rounded-xl pl-8 pr-2 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-[#00aeef]/50 [color-scheme:dark]"
+                      />
+                    </div>
+
+                    <div className="relative sm:col-span-3">
+                      <Calendar size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none" />
+                      <input
+                        type="date"
+                        value={filterDateEnd}
+                        onChange={(e) => setFilterDateEnd(e.target.value)}
+                        title="Data final (opcional — deixe em branco para filtrar uma data exata)"
+                        className="w-full bg-black/25 border border-white/10 rounded-xl pl-8 pr-2 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-[#00aeef]/50 [color-scheme:dark]"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-white/70">
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={toggleSelectAllFiltered}
+                        disabled={filteredSubmissions.length === 0}
+                        className="flex items-center gap-1.5 text-[#00aeef] hover:underline disabled:opacity-40"
+                      >
+                        {allFilteredSelected ? <CheckSquare size={15} /> : <Square size={15} />}
+                        {allFilteredSelected ? 'Desmarcar filtrados' : 'Selecionar todos os filtrados'}
+                      </button>
+                      {selectedSubKeys.size > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedSubKeys(new Set())}
+                          className="text-rose-400 hover:underline"
+                        >
+                          Limpar seleção ({selectedSubKeys.size})
+                        </button>
+                      )}
+                    </div>
+
+                    {(searchTerm || filterDateStart || filterDateEnd) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchTerm('');
+                          setFilterDateStart('');
+                          setFilterDateEnd('');
+                        }}
+                        className="text-amber-400 hover:underline"
+                      >
+                        Limpar filtros de busca/data
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
             
             <div className="p-6 overflow-y-auto flex-1 custom-scrollbar">
@@ -406,19 +621,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
                 <div className="text-center p-8 text-white/50">
                   Nenhum cadastro encontrado para este usuário.
                 </div>
+              ) : filteredSubmissions.length === 0 ? (
+                <div className="text-center p-8 text-white/50">
+                  Nenhum cadastro corresponde à pesquisa ou data selecionada.
+                </div>
               ) : (
                 <div className="flex flex-col gap-4">
-                  {userSubmissions.map((sub, idx) => {
+                  {filteredSubmissions.map(({ sub, originalIdx, key }) => {
                     const statusVisita = safeRender(sub["STATUSDAVISITA"]);
                     const isSimplified = ['Ausente', 'Inexistente', 'Recusa', 'Lote Vago', 'Lote', 'Desabitado', 'Desativado'].includes(statusVisita);
                     const nomeStr = safeRender(sub["NOMECOMPLETO"]);
                     const titleText = nomeStr || (isSimplified ? statusVisita : "Sem Nome");
+                    const isSelected = selectedSubKeys.has(key);
 
                     return (
-                      <div key={sub._id || idx} className="bg-black/20 border border-white/10 rounded-xl p-4">
-                        <div className="flex justify-between items-start mb-2">
-                          <span className="font-semibold text-[#00aeef]">#{idx + 1} - {titleText}</span>
-                          <span className="text-xs text-white/50">
+                      <div
+                        key={key}
+                        onClick={() => toggleSelectSub(key)}
+                        className={`bg-black/20 border rounded-xl p-4 cursor-pointer transition-colors ${
+                          isSelected ? 'border-[#00aeef] bg-[#00aeef]/10' : 'border-white/10 hover:border-white/25'
+                        }`}
+                      >
+                        <div className="flex justify-between items-start gap-2 mb-2">
+                          <div className="flex items-center gap-2.5">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleSelectSub(key);
+                              }}
+                              className="text-[#00aeef] shrink-0"
+                              title={isSelected ? 'Desmarcar cadastro' : 'Selecionar cadastro'}
+                            >
+                              {isSelected ? <CheckSquare size={18} /> : <Square size={18} className="text-white/40" />}
+                            </button>
+                            <span className="font-semibold text-[#00aeef]">#{originalIdx + 1} - {titleText}</span>
+                          </div>
+                          <span className="text-xs text-white/50 shrink-0">
                             {sub.created_at ? new Date(sub.created_at).toLocaleString('pt-BR') : safeRender(sub["Data"])}
                           </span>
                         </div>
@@ -441,12 +680,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminN
                                 href={`https://www.google.com/maps?q=${safeRender(sub["Latitude0"])},${safeRender(sub["Longitude0"])}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
                                 className="px-3 py-1.5 bg-green-500/10 hover:bg-green-500/20 text-green-400 rounded-lg transition-colors text-xs font-medium flex items-center gap-2 w-fit"
                               >
                                 <MapPin size={14} />
                                 Ver no Mapa
                               </a>
                             )}
+                            <button
+                              type="button"
+                              disabled={isExportingPdf}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleExportPdf([sub]);
+                              }}
+                              className="px-3 py-1.5 bg-[#00aeef]/15 hover:bg-[#00aeef]/25 text-[#00aeef] rounded-lg transition-colors text-xs font-medium flex items-center gap-1.5 w-fit disabled:opacity-40"
+                              title="Exportar PDF apenas deste cadastro"
+                            >
+                              <FileDown size={14} />
+                              PDF Individual
+                            </button>
                           </div>
                         </div>
                       </div>
